@@ -12,11 +12,13 @@ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:en
 body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
 h1{margin:0 0 4px;font-size:1.6rem}
+h2{font-size:1.2rem;margin:28px 0 10px}
 .sub{color:var(--mut);margin:0 0 16px;font-size:.95rem}
-.add{display:flex;gap:8px;margin-bottom:16px}
-input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font-size:1rem}
+.add{display:flex;gap:8px;margin-bottom:12px}
+input,select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font-size:1rem}
 button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-size:1rem;background:var(--ac);color:#fff;font-weight:600}
 button.g{background:var(--off);color:var(--tx)}
+button:disabled{opacity:.45;cursor:not-allowed}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
 .c{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px}
 .n{font-weight:700;font-size:1.1rem;display:flex;justify-content:space-between;gap:8px}
@@ -28,26 +30,59 @@ button.g{background:var(--off);color:var(--tx)}
 .dots i.on{background:var(--on)}
 .row{display:flex;gap:8px;margin-top:6px}
 .row button{flex:1}
-.em{color:var(--mut);text-align:center;padding:30px 0}
+.em{color:var(--mut);text-align:center;padding:20px 0}
 .top{color:var(--ac)}
 [hidden]{display:none!important}
 #ed{flex-wrap:wrap}
 .dn{background:#b3261e}
 .ib{background:none;color:var(--mut);padding:0 4px;font-size:1.1rem;line-height:1}
+.me{outline:2px solid var(--ac)}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin-bottom:12px}
+.tag{font-size:.8rem;padding:2px 8px;border-radius:99px;background:var(--off);margin-left:6px}
+.pr{margin-bottom:10px}
+.vt{color:var(--mut);font-size:.9rem;margin:6px 0}
+#log{list-style:none;margin:0;padding:0}
+#log li{padding:7px 0;border-bottom:1px solid var(--bd);font-size:.95rem}
+#log small{color:var(--mut);margin-right:6px}
+dialog{border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);max-width:340px;width:calc(100% - 32px)}
+dialog::backdrop{background:#0008}
 </style>
 </head>
 <body>
 <main>
 <h1>🍕 Contador de Pizzas</h1>
-<p class="sub">Cada 8 fatias = 1 pizza. Toque em “+ fatia” para dar uma fatia a alguém.</p>
-<div class="add"><input id="nome" placeholder="Nome da pessoa" maxlength="30"><button id="addp">Adicionar</button></div>
+<p class="sub">8 fatias = 1 pizza. Em você mesmo, é direto. Em outra pessoa, o plenário (3 votos) decide.</p>
+
+<div id="login">
+  <div class="add"><select id="sel"></select><button id="enter">Entrar</button></div>
+  <div class="add"><input id="nome" placeholder="Novo cadastro: seu nome" maxlength="30"><button id="reg" class="g">Cadastrar</button></div>
+</div>
+<div id="bar" class="bar" hidden><span id="who"></span><button id="out" class="g">Sair</button></div>
 <div id="ed" class="add" hidden><input id="edn" maxlength="30"><button id="eds">Salvar</button><button id="edrm" class="dn">Remover perfil</button><button id="edc" class="g">Cancelar</button></div>
 <div id="msg" class="sub" hidden></div>
+
 <div id="grid" class="grid"></div>
+
+<h2>🏆 Ranking de devedores</h2>
+<div id="rank"></div>
+
+<h2>🗳️ Plenário</h2>
+<div id="plen"></div>
+
+<h2>📜 Log</h2>
+<ul id="log"></ul>
 </main>
+
+<dialog id="dlg">
+  <h3 id="dt" style="margin-top:0"></h3>
+  <div class="add"><input id="qtd" type="number" min="1" value="1"><select id="un"><option value="f">fatias</option><option value="p">pizzas</option></select></div>
+  <p class="sub">Precisa de 3 votos de outras pessoas; a maioria decide (você não vota na sua proposta).</p>
+  <div class="row"><button id="dok">Enviar proposta</button><button id="dno" class="g">Cancelar</button></div>
+</dialog>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot }
+import { getFirestore, collection, doc, addDoc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -59,80 +94,160 @@ const firebaseConfig = {
   appId: "1:662619456356:web:fe246996b1984e3f9d7071"
 };
 const db = getFirestore(initializeApp(firebaseConfig));
-const peopleCol = collection(db, "people");
-const slicesCol = collection(db, "slices");
+const C = n => collection(db, n);
+const $ = id => document.getElementById(id);
+const VOTES = 3;
 
-let people = [], slices = [];
-const grid = document.getElementById("grid"), msg = document.getElementById("msg");
+let people = [], slices = [], props = [], logs = [], me = null, dlgTarget = null, edId = null;
+try { me = localStorage.getItem("pizza_me"); } catch (e) {}
+function saveMe(){ try { me ? localStorage.setItem("pizza_me", me) : localStorage.removeItem("pizza_me"); } catch (e) {} }
 
-function esc(s){ const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+const nm = id => (people.find(p => p.id === id) || { name: "?" }).name;
+const mp = () => people.find(p => p.id === me);
+const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
+const err = e => { $("msg").hidden = false; $("msg").textContent = "Não foi possível salvar. Verifique a conexão e as regras do Firestore."; console.error(e); };
+const log = text => addDoc(C("logs"), { at: Date.now(), text }).catch(err);
 
-function render(){
-  const cnt = {};
-  slices.forEach(s => { cnt[s.to] = (cnt[s.to] || 0) + 1; });
+/* ---------- render ---------- */
+function renderAuth(){
+  const m = mp();
+  $("login").hidden = !!m; $("bar").hidden = !m;
+  if (m) $("who").textContent = "Você: " + m.name;
+  const cur = $("sel").value;
+  $("sel").innerHTML = '<option value="">Escolha seu nome</option>' +
+    [...people].sort((a, b) => a.name.localeCompare(b.name)).map(p => '<option value="' + p.id + '">' + esc(p.name) + "</option>").join("");
+  $("sel").value = cur;
+}
+
+function counts(){ const c = {}; slices.forEach(s => { c[s.to] = (c[s.to] || 0) + 1; }); return c; }
+
+function renderGrid(){
+  const cnt = counts();
   const list = people.map(p => { const t = cnt[p.id] || 0; return { id: p.id, name: p.name, t, pz: Math.floor(t / 8), r: t % 8 }; });
   list.sort((a, b) => b.t - a.t || a.name.localeCompare(b.name));
-  if (!list.length){ grid.innerHTML = '<div class="em">Ninguém por aqui ainda. Adicione as pessoas acima.</div>'; return; }
-  grid.innerHTML = list.map((p, i) => {
+  if (!list.length){ $("grid").innerHTML = '<div class="em">Ninguém por aqui ainda. Faça o cadastro acima.</div>'; return; }
+  $("grid").innerHTML = list.map((p, i) => {
     let dots = ""; for (let k = 0; k < 8; k++) dots += '<i class="' + (k < p.r ? "on" : "") + '"></i>';
     const pizzas = p.pz > 0 ? "🍕".repeat(Math.min(p.pz, 6)) + (p.pz > 6 ? "…" : "") + "<b>×" + p.pz + "</b>" : "<b>0 pizzas</b>";
-    return '<div class="c"><div class="n"><span>' + (i === 0 && p.t > 0 ? '<span class="top">★ </span>' : "") + esc(p.name) +
-      '</span><small>' + p.t + ' fatias <button class="ib" data-a="edit" data-id="' + p.id + '" title="Editar ou remover">✎</button></small></div>' +
-      '<div class="pz">' + pizzas + '</div><div class="dots">' + dots + '</div>' +
-      '<div class="row"><button data-a="add" data-id="' + p.id + '">+ fatia</button><button data-a="addp" data-id="' + p.id + '">+ 🍕</button></div>' +
-      '<div class="row"><button class="g" data-a="rm" data-id="' + p.id + '" title="Tirar 1 fatia">− fatia</button><button class="g" data-a="rmp" data-id="' + p.id + '" title="Tirar 1 pizza (8 fatias)">− 🍕</button></div></div>';
+    const mine = p.id === me;
+    const btns = mine
+      ? '<div class="row"><button data-a="add" data-id="' + p.id + '">+ fatia</button><button data-a="addp" data-id="' + p.id + '">+ 🍕</button></div>' +
+        '<div class="row"><button class="g" data-a="rm" data-id="' + p.id + '">− fatia</button><button class="g" data-a="rmp" data-id="' + p.id + '">− 🍕</button></div>'
+      : '<div class="row"><button data-a="prop" data-id="' + p.id + '"' + (me ? "" : " disabled") + '>Propor fatias/pizzas</button></div>';
+    return '<div class="c' + (mine ? " me" : "") + '"><div class="n"><span>' + (i === 0 && p.t > 0 ? '<span class="top">★ </span>' : "") + esc(p.name) +
+      '</span><small>' + p.t + " fatias" + (mine ? ' <button class="ib" data-a="edit" data-id="' + p.id + '" title="Editar ou remover">✎</button>' : "") + "</small></div>" +
+      '<div class="pz">' + pizzas + '</div><div class="dots">' + dots + "</div>" + btns + "</div>";
   }).join("");
 }
 
-function err(e){ msg.hidden = false; msg.textContent = "Não foi possível salvar. Verifique a conexão e as regras do Firestore."; console.error(e); }
+function renderRank(){
+  const cnt = counts(), md = ["🥇", "🥈", "🥉"];
+  const l = people.map(p => ({ n: p.name, t: cnt[p.id] || 0 })).filter(x => x.t > 0).sort((a, b) => b.t - a.t || a.n.localeCompare(b.n));
+  $("rank").innerHTML = l.length ? l.map((x, i) =>
+    '<div class="c pr">' + (md[i] || (i + 1) + "º") + " <b>" + esc(x.n) + "</b> deve " + plural(Math.floor(x.t / 8), "pizza", "pizzas") +
+    (x.t % 8 ? " e " + plural(x.t % 8, "fatia", "fatias") : "") + '<span class="tag">' + x.t + " fatias</span></div>").join("")
+    : '<div class="em">Ninguém está devendo ainda.</div>';
+}
 
-onSnapshot(peopleCol, s => { people = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err);
-onSnapshot(slicesCol, s => { slices = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err);
+function renderPlen(){
+  const sorted = [...props].sort((a, b) => b.at - a.at);
+  const all = sorted.filter(p => p.status === "aberta").concat(sorted.filter(p => p.status !== "aberta").slice(0, 5));
+  if (!all.length){ $("plen").innerHTML = '<div class="em">Nenhuma proposta ainda.</div>'; return; }
+  $("plen").innerHTML = all.map(p => {
+    const v = p.votes || {}, ids = Object.keys(v);
+    const vt = ids.length ? ids.map(u => esc(nm(u)) + ": " + (v[u] === "ok" ? "✅ OK" : "❌ Rejeito")).join(" · ") : "Sem votos ainda";
+    const can = p.status === "aberta" && me && me !== p.by && !v[me];
+    const st = p.status === "aberta" ? "Em votação" : p.status === "aprovada" ? "✅ Aprovada" : "❌ Rejeitada";
+    return '<div class="c pr"><b>' + esc(nm(p.by)) + "</b> propõe <b>+" + esc(p.label) + "</b> para <b>" + esc(nm(p.target)) + '</b><span class="tag">' + st + "</span>" +
+      '<div class="vt">' + vt + " (" + ids.length + "/" + VOTES + ")</div>" +
+      (can ? '<div class="row"><button data-v="ok" data-id="' + p.id + '">OK</button><button class="dn" data-v="no" data-id="' + p.id + '">Rejeito</button></div>' : "") + "</div>";
+  }).join("");
+}
 
-grid.addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return;
-  const id = b.dataset.id, a = b.dataset.a;
-  if (a === "edit") openEd(id);
-  else if (a === "add") addDoc(slicesCol, { to: id, at: Date.now() }).catch(err);
+function renderLog(){
+  const f = t => new Date(t).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  $("log").innerHTML = [...logs].sort((a, b) => b.at - a.at).slice(0, 40).map(l => "<li><small>" + f(l.at) + "</small>" + esc(l.text) + "</li>").join("") || '<li class="em">Sem registros.</li>';
+}
+const render = () => { renderAuth(); renderGrid(); renderRank(); renderPlen(); renderLog(); };
+
+const sub = (n, set) => onSnapshot(C(n), s => { set(s.docs.map(d => ({ id: d.id, ...d.data() }))); render(); }, err);
+sub("people", x => people = x); sub("slices", x => slices = x); sub("proposals", x => props = x); sub("logs", x => logs = x);
+
+/* ---------- login / cadastro ---------- */
+$("enter").onclick = () => { if (!$("sel").value) return; me = $("sel").value; saveMe(); render(); };
+$("out").onclick = () => { me = null; saveMe(); closeEd(); render(); };
+$("reg").onclick = register;
+$("nome").addEventListener("keydown", e => { if (e.key === "Enter") register(); });
+function register(){
+  const v = $("nome").value.trim(); if (!v) return;
+  const ex = people.find(p => p.name.toLowerCase() === v.toLowerCase());
+  if (ex){ $("sel").value = ex.id; $("nome").value = ""; $("msg").hidden = false; $("msg").textContent = "Esse nome já existe. Ele foi selecionado na lista: clique em Entrar."; return; }
+  addDoc(C("people"), { name: v, at: Date.now() }).then(r => { me = r.id; saveMe(); $("nome").value = ""; $("msg").hidden = true; return log(v + " se cadastrou"); }).catch(err);
+}
+
+/* ---------- ações no próprio perfil ---------- */
+$("grid").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || !me) return;
+  const id = b.dataset.id, a = b.dataset.a, who = nm(me);
+  if (a === "prop") return openDlg(id);
+  if (id !== me) return;
+  if (a === "edit") return openEd();
+  if (a === "add") addDoc(C("slices"), { to: id, at: Date.now() }).then(() => log(who + " adicionou 1 fatia a si")).catch(err);
   else if (a === "addp"){
-    const t = Date.now(), ps = [];
-    for (let k = 0; k < 8; k++) ps.push(addDoc(slicesCol, { to: id, at: t + k }));
-    Promise.all(ps).catch(err);
+    const t = Date.now(), ps = []; for (let k = 0; k < 8; k++) ps.push(addDoc(C("slices"), { to: id, at: t + k }));
+    Promise.all(ps).then(() => log(who + " adicionou 1 pizza (8 fatias) a si")).catch(err);
   } else {
-    const n = a === "rmp" ? 8 : 1;
-    const mine = slices.filter(s => s.to === id).sort((x, y) => y.at - x.at).slice(0, n);
-    Promise.all(mine.map(s => deleteDoc(doc(db, "slices", s.id)))).catch(err);
+    const mine = slices.filter(s => s.to === id).sort((x, y) => y.at - x.at).slice(0, a === "rmp" ? 8 : 1);
+    if (!mine.length) return;
+    Promise.all(mine.map(s => deleteDoc(doc(db, "slices", s.id)))).then(() => log(who + " removeu " + plural(mine.length, "fatia", "fatias") + " de si")).catch(err);
   }
 });
 
-const ed = document.getElementById("ed"), edIn = document.getElementById("edn"), rmB = document.getElementById("edrm");
-let edId = null;
-function openEd(id){
-  const p = people.find(x => x.id === id); if (!p) return;
-  edId = id; edIn.value = p.name; rmB.textContent = "Remover perfil"; ed.hidden = false; edIn.focus();
-  ed.scrollIntoView({ block: "nearest" });
-}
-function closeEd(){ edId = null; ed.hidden = true; }
-document.getElementById("eds").addEventListener("click", () => {
-  const v = edIn.value.trim(); if (!v || !edId) return;
-  updateDoc(doc(db, "people", edId), { name: v }).then(closeEd).catch(err);
-});
-document.getElementById("edc").addEventListener("click", closeEd);
-rmB.addEventListener("click", () => {
+/* ---------- editar / remover o próprio perfil ---------- */
+function openEd(){ const p = mp(); if (!p) return; edId = p.id; $("edn").value = p.name; $("edrm").textContent = "Remover perfil"; $("ed").hidden = false; $("edn").focus(); }
+function closeEd(){ edId = null; $("ed").hidden = true; }
+$("eds").onclick = () => {
+  const v = $("edn").value.trim(), old = nm(edId); if (!v || !edId) return;
+  updateDoc(doc(db, "people", edId), { name: v }).then(() => { closeEd(); return log(old + " mudou o nome para " + v); }).catch(err);
+};
+$("edc").onclick = closeEd;
+$("edrm").onclick = () => {
   if (!edId) return;
-  if (rmB.textContent === "Remover perfil"){ rmB.textContent = "Confirmar remoção"; return; }
-  const id = edId;
+  if ($("edrm").textContent === "Remover perfil"){ $("edrm").textContent = "Confirmar remoção"; return; }
+  const id = edId, old = nm(id);
   const ops = slices.filter(s => s.to === id).map(s => deleteDoc(doc(db, "slices", s.id)));
   ops.push(deleteDoc(doc(db, "people", id)));
-  Promise.all(ops).then(closeEd).catch(err);
-});
+  Promise.all(ops).then(() => { me = null; saveMe(); closeEd(); return log(old + " removeu o próprio perfil"); }).catch(err);
+};
 
-function addPerson(){
-  const inp = document.getElementById("nome"), v = inp.value.trim(); if (!v) return;
-  addDoc(peopleCol, { name: v, at: Date.now() }).then(() => { inp.value = ""; }).catch(err);
-}
-document.getElementById("addp").addEventListener("click", addPerson);
-document.getElementById("nome").addEventListener("keydown", e => { if (e.key === "Enter") addPerson(); });
+/* ---------- propostas e plenário ---------- */
+function openDlg(target){ dlgTarget = target; $("dt").textContent = "Propor para " + nm(target); $("qtd").value = 1; $("un").value = "f"; $("dlg").showModal(); }
+$("dno").onclick = () => $("dlg").close();
+$("dok").onclick = () => {
+  const unit = $("un").value, q = Math.floor(+$("qtd").value), max = unit === "p" ? 10 : 80;
+  if (!(q >= 1 && q <= max) || !dlgTarget || !me) return;
+  const n = unit === "p" ? q * 8 : q, label = unit === "p" ? plural(q, "pizza", "pizzas") : plural(q, "fatia", "fatias");
+  addDoc(C("proposals"), { target: dlgTarget, by: me, n, label, at: Date.now(), status: "aberta", votes: {} })
+    .then(() => log(nm(me) + " propôs +" + label + " para " + nm(dlgTarget))).then(() => $("dlg").close()).catch(err);
+};
+
+$("plen").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-v]"); if (!b || !me) return;
+  const id = b.dataset.id, v = b.dataset.v, ref = doc(db, "proposals", id);
+  try {
+    const cur = (await getDoc(ref)).data();
+    if (!cur || cur.status !== "aberta" || cur.by === me || (cur.votes || {})[me]) return;
+    await updateDoc(ref, { ["votes." + me]: v });
+    await log(nm(me) + " votou " + (v === "ok" ? "OK" : "Rejeito") + " na proposta de " + nm(cur.by) + " (+" + cur.label + " para " + nm(cur.target) + ")");
+    const p = (await getDoc(ref)).data(), vals = Object.values(p.votes || {});
+    if (vals.length < VOTES || p.status !== "aberta") return;
+    const ok = vals.filter(x => x === "ok").length, approved = ok > vals.length - ok;
+    if (approved){ const t = Date.now(), ps = []; for (let k = 0; k < p.n; k++) ps.push(setDoc(doc(db, "slices", "p_" + id + "_" + k), { to: p.target, at: t + k, prop: id })); await Promise.all(ps); }
+    await updateDoc(ref, { status: approved ? "aprovada" : "rejeitada" });
+    await log("Proposta +" + p.label + " para " + nm(p.target) + (approved ? " APROVADA" : " REJEITADA") + " (" + ok + " OK, " + (vals.length - ok) + " Rejeito)");
+  } catch (x) { err(x); }
+});
 render();
 </script>
 </body>
