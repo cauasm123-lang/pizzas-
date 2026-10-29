@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Contador de Pizzas</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍕</text></svg>">
+<style>
+:root{--bg:#fff8ef;--card:#fff;--tx:#2b1d12;--mut:#8a7360;--ac:#d9421c;--bd:#f0dcc4;--on:#f2a31b;--off:#f1e5d3;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1410;--card:#2a1f18;--tx:#f6e9da;--mut:#b49c85;--ac:#ff6a3d;--bd:#40302480;--off:#3b2d22;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{margin:0 0 4px;font-size:1.6rem}
+.sub{color:var(--mut);margin:0 0 16px;font-size:.95rem}
+.add{display:flex;gap:8px;margin-bottom:16px}
+input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font-size:1rem}
+button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-size:1rem;background:var(--ac);color:#fff;font-weight:600}
+button.g{background:var(--off);color:var(--tx)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px}
+.n{font-weight:700;font-size:1.1rem;display:flex;justify-content:space-between;gap:8px}
+.n small{color:var(--mut);font-weight:400}
+.pz{font-size:1.9rem;margin:6px 0;min-height:2.3rem;word-break:break-all}
+.pz b{font-size:1rem;color:var(--mut);margin-left:6px}
+.dots{display:flex;gap:5px;margin:8px 0 12px}
+.dots i{flex:1;height:10px;border-radius:5px;background:var(--off)}
+.dots i.on{background:var(--on)}
+.row{display:flex;gap:8px;margin-top:6px}
+.row button{flex:1}
+.em{color:var(--mut);text-align:center;padding:30px 0}
+.top{color:var(--ac)}
+[hidden]{display:none!important}
+#ed{flex-wrap:wrap}
+.dn{background:#b3261e}
+.ib{background:none;color:var(--mut);padding:0 4px;font-size:1.1rem;line-height:1}
+</style>
+</head>
+<body>
+<main>
+<h1>🍕 Contador de Pizzas</h1>
+<p class="sub">Cada 8 fatias = 1 pizza. Toque em “+ fatia” para dar uma fatia a alguém.</p>
+<div class="add"><input id="nome" placeholder="Nome da pessoa" maxlength="30"><button id="addp">Adicionar</button></div>
+<div id="ed" class="add" hidden><input id="edn" maxlength="30"><button id="eds">Salvar</button><button id="edrm" class="dn">Remover perfil</button><button id="edc" class="g">Cancelar</button></div>
+<div id="msg" class="sub" hidden></div>
+<div id="grid" class="grid"></div>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCO1iNZqgCTi8NdjbcA1B0cSrvm8Q_o1Do",
+  authDomain: "pizzas-aab2b.firebaseapp.com",
+  projectId: "pizzas-aab2b",
+  storageBucket: "pizzas-aab2b.firebasestorage.app",
+  messagingSenderId: "662619456356",
+  appId: "1:662619456356:web:fe246996b1984e3f9d7071"
+};
+const db = getFirestore(initializeApp(firebaseConfig));
+const peopleCol = collection(db, "people");
+const slicesCol = collection(db, "slices");
+
+let people = [], slices = [];
+const grid = document.getElementById("grid"), msg = document.getElementById("msg");
+
+function esc(s){ const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+function render(){
+  const cnt = {};
+  slices.forEach(s => { cnt[s.to] = (cnt[s.to] || 0) + 1; });
+  const list = people.map(p => { const t = cnt[p.id] || 0; return { id: p.id, name: p.name, t, pz: Math.floor(t / 8), r: t % 8 }; });
+  list.sort((a, b) => b.t - a.t || a.name.localeCompare(b.name));
+  if (!list.length){ grid.innerHTML = '<div class="em">Ninguém por aqui ainda. Adicione as pessoas acima.</div>'; return; }
+  grid.innerHTML = list.map((p, i) => {
+    let dots = ""; for (let k = 0; k < 8; k++) dots += '<i class="' + (k < p.r ? "on" : "") + '"></i>';
+    const pizzas = p.pz > 0 ? "🍕".repeat(Math.min(p.pz, 6)) + (p.pz > 6 ? "…" : "") + "<b>×" + p.pz + "</b>" : "<b>0 pizzas</b>";
+    return '<div class="c"><div class="n"><span>' + (i === 0 && p.t > 0 ? '<span class="top">★ </span>' : "") + esc(p.name) +
+      '</span><small>' + p.t + ' fatias <button class="ib" data-a="edit" data-id="' + p.id + '" title="Editar ou remover">✎</button></small></div>' +
+      '<div class="pz">' + pizzas + '</div><div class="dots">' + dots + '</div>' +
+      '<div class="row"><button data-a="add" data-id="' + p.id + '">+ fatia</button><button data-a="addp" data-id="' + p.id + '">+ 🍕</button></div>' +
+      '<div class="row"><button class="g" data-a="rm" data-id="' + p.id + '" title="Tirar 1 fatia">− fatia</button><button class="g" data-a="rmp" data-id="' + p.id + '" title="Tirar 1 pizza (8 fatias)">− 🍕</button></div></div>';
+  }).join("");
+}
+
+function err(e){ msg.hidden = false; msg.textContent = "Não foi possível salvar. Verifique a conexão e as regras do Firestore."; console.error(e); }
+
+onSnapshot(peopleCol, s => { people = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err);
+onSnapshot(slicesCol, s => { slices = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err);
+
+grid.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const id = b.dataset.id, a = b.dataset.a;
+  if (a === "edit") openEd(id);
+  else if (a === "add") addDoc(slicesCol, { to: id, at: Date.now() }).catch(err);
+  else if (a === "addp"){
+    const t = Date.now(), ps = [];
+    for (let k = 0; k < 8; k++) ps.push(addDoc(slicesCol, { to: id, at: t + k }));
+    Promise.all(ps).catch(err);
+  } else {
+    const n = a === "rmp" ? 8 : 1;
+    const mine = slices.filter(s => s.to === id).sort((x, y) => y.at - x.at).slice(0, n);
+    Promise.all(mine.map(s => deleteDoc(doc(db, "slices", s.id)))).catch(err);
+  }
+});
+
+const ed = document.getElementById("ed"), edIn = document.getElementById("edn"), rmB = document.getElementById("edrm");
+let edId = null;
+function openEd(id){
+  const p = people.find(x => x.id === id); if (!p) return;
+  edId = id; edIn.value = p.name; rmB.textContent = "Remover perfil"; ed.hidden = false; edIn.focus();
+  ed.scrollIntoView({ block: "nearest" });
+}
+function closeEd(){ edId = null; ed.hidden = true; }
+document.getElementById("eds").addEventListener("click", () => {
+  const v = edIn.value.trim(); if (!v || !edId) return;
+  updateDoc(doc(db, "people", edId), { name: v }).then(closeEd).catch(err);
+});
+document.getElementById("edc").addEventListener("click", closeEd);
+rmB.addEventListener("click", () => {
+  if (!edId) return;
+  if (rmB.textContent === "Remover perfil"){ rmB.textContent = "Confirmar remoção"; return; }
+  const id = edId;
+  const ops = slices.filter(s => s.to === id).map(s => deleteDoc(doc(db, "slices", s.id)));
+  ops.push(deleteDoc(doc(db, "people", id)));
+  Promise.all(ops).then(closeEd).catch(err);
+});
+
+function addPerson(){
+  const inp = document.getElementById("nome"), v = inp.value.trim(); if (!v) return;
+  addDoc(peopleCol, { name: v, at: Date.now() }).then(() => { inp.value = ""; }).catch(err);
+}
+document.getElementById("addp").addEventListener("click", addPerson);
+document.getElementById("nome").addEventListener("keydown", e => { if (e.key === "Enter") addPerson(); });
+render();
+</script>
+</body>
+</html>
